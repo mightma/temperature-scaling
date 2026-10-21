@@ -1,0 +1,220 @@
+{
+  "config": {
+    "model": "Qwen/Qwen3.5-9B",
+    "prompt_format": "quyet-v1",
+    "letter_tokens": "both",
+    "min_T": 1.0,
+    "max_T": 20.0,
+    "n_folds": 5,
+    "fixed_T": "1.5404",
+    "fixed_T_note": "global T fitted on the MMLU calibration split (validation + dev) with the quyet-v1 prompt; no OpenDecisions data",
+    "bootstrap": 1000,
+    "max_items": null,
+    "revision": "ff0b640be2b72c7d06d9d656a34ad6eed79ec7fe",
+    "dtype": "bfloat16",
+    "attn_impl": null,
+    "max_batch_tokens": 16384,
+    "max_batch_size": 32,
+    "seed": 0,
+    "output_dir": "results",
+    "force": false
+  },
+  "n_items": 2352,
+  "n_groups": 2019,
+  "fit": {
+    "insample": {
+      "choice": 1.6662087960674103,
+      "noul": 1.7961255504376035,
+      "score": 1.7170080450101575
+    },
+    "crossfit_folds": [
+      {
+        "choice": 1.6914177211778387,
+        "noul": 1.6413755853043408,
+        "score": 1.6787659410563491
+      },
+      {
+        "choice": 1.6787659410563491,
+        "noul": 1.6914177211778387,
+        "score": 1.7693560576488099
+      },
+      {
+        "choice": 1.6537455783415982,
+        "noul": 1.8096617945196267,
+        "score": 1.7041648496360604
+      },
+      {
+        "choice": 1.6537455783415982,
+        "noul": 1.8648346277317385,
+        "score": 1.6662087960674103
+      },
+      {
+        "choice": 1.6914177211778387,
+        "noul": 1.9507637905039388,
+        "score": 1.7693560576488099
+      }
+    ]
+  },
+  "settings": {
+    "t1": {
+      "score": {
+        "capability": 61.10932605182988,
+        "intelligence": 48.507944825071,
+        "calibration": 73.71070727858876,
+        "competence_per_type": {
+          "choice": 62.28646230737032,
+          "noul": 47.69589610641553,
+          "score": 35.54147606142715
+        },
+        "calibration_per_type": {
+          "choice": 58.954427368506735,
+          "noul": 78.71730460312824,
+          "score": 83.46038986413129
+        },
+        "accuracy_per_type": {
+          "choice": 71.47707979626486,
+          "noul": 76.10921501706484,
+          "score": 60.37414965986394
+        },
+        "items": 2352,
+        "predicted": 2352,
+        "calibration_items_tvd": 0.26229354357505735,
+        "calibration_items": 129
+      },
+      "T_label": "1.000 / 1.000 / 1.000"
+    },
+    "crossfit": {
+      "score": {
+        "capability": 66.92639514155303,
+        "intelligence": 47.546844791954165,
+        "calibration": 86.30594549115189,
+        "competence_per_type": {
+          "choice": 62.28646230737032,
+          "noul": 47.69589610641553,
+          "score": 32.658175962076655
+        },
+        "calibration_per_type": {
+          "choice": 83.08159245216342,
+          "noul": 85.68121251301068,
+          "score": 90.15503150828157
+        },
+        "accuracy_per_type": {
+          "choice": 71.47707979626486,
+          "noul": 76.10921501706484,
+          "score": 60.37414965986394
+        },
+        "items": 2352,
+        "predicted": 2352,
+        "calibration_items_tvd": 0.2339466906408949,
+        "calibration_items": 129
+      },
+      "T_label": "per fold, see below"
+    },
+    "insample": {
+      "score": {
+        "capability": 66.97339530388848,
+        "intelligence": 47.535842537944596,
+        "calibration": 86.41094806983237,
+        "competence_per_type": {
+          "choice": 62.28646230737032,
+          "noul": 47.69589610641553,
+          "score": 32.625169200047935
+        },
+        "calibration_per_type": {
+          "choice": 83.06205055696829,
+          "noul": 85.67678681132223,
+          "score": 90.49400684120661
+        },
+        "accuracy_per_type": {
+          "choice": 71.47707979626486,
+          "noul": 76.10921501706484,
+          "score": 60.37414965986394
+        },
+        "items": 2352,
+        "predicted": 2352,
+        "calibration_items_tvd": 0.23392677389748193,
+        "calibration_items": 129
+      },
+      "T_label": "1.666 / 1.796 / 1.717"
+    },
+    "fixed": {
+      "score": {
+        "capability": 65.83467298848275,
+        "intelligence": 47.81667938248632,
+        "calibration": 83.85266659447917,
+        "competence_per_type": {
+          "choice": 62.28646230737032,
+          "noul": 47.69589610641553,
+          "score": 33.46767973367311
+        },
+        "calibration_per_type": {
+          "choice": 79.30634560924513,
+          "noul": 84.44397249925852,
+          "score": 87.80768167493387
+        },
+        "accuracy_per_type": {
+          "choice": 71.47707979626486,
+          "noul": 76.10921501706484,
+          "score": 60.37414965986394
+        },
+        "items": 2352,
+        "predicted": 2352,
+        "calibration_items_tvd": 0.2357614980498572,
+        "calibration_items": 129
+      },
+      "T_label": "1.540 / 1.540 / 1.540"
+    }
+  },
+  "bootstrap": {
+    "t1": {
+      "capability_ci": [
+        56.964263022713766,
+        64.16815279463536
+      ],
+      "diff_vs_t1_ci": [
+        0.0,
+        0.0
+      ]
+    },
+    "crossfit": {
+      "capability_ci": [
+        62.6440056741234,
+        68.47145982309628
+      ],
+      "diff_vs_t1_ci": [
+        3.7490940188502275,
+        6.477108631932538
+      ]
+    },
+    "insample": {
+      "capability_ci": [
+        62.807511449847794,
+        68.463745998548
+      ],
+      "diff_vs_t1_ci": [
+        3.7673990814519827,
+        6.4779229158589695
+      ]
+    },
+    "fixed": {
+      "capability_ci": [
+        61.660074348429795,
+        68.04713096023974
+      ],
+      "diff_vs_t1_ci": [
+        3.410116966710625,
+        5.572810013088942
+      ]
+    }
+  },
+  "letter_mass": {
+    "mean": 0.9972588419914246,
+    "min": 0.028431357815861702,
+    "below_0.5": 1,
+    "mean_per_type": {
+      "choice": 0.9976718425750732,
+      "noul": 0.996729850769043,
+      "score": 0.9969590306282043
+    }
+  }
+}

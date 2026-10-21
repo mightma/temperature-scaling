@@ -1,4 +1,4 @@
-# Qwen3.5-9B 在 MCQ 上的温度缩放校准：实验报告
+# Qwen3.5-9B 在 MCQ 和 OpenDecisions 上的温度缩放校准：实验报告
 
 日期：2026-10-21 · 模型：`Qwen/Qwen3.5-9B`（bf16，单张 A10G 24 GB）· 代码：`ts/` · 原始结果：`results/`
 
@@ -6,6 +6,7 @@
 
 我们用 one-letter readout（在 "Answer:" 之后读取 A/B/C/D… 的 next-token 概率）作为 MCQ 的置信度，在 MMLU 校准集
 （1,816 条）上拟合温度，并在三个不参与拟合的测试集上评估：MMLU test（14,042）、MMLU-Pro（12,032）、MMLU-Redux 2.0（5,330）。
+此外，我们还在 OpenDecisions（2,352 道决策题）上用官方评分器计算了 Capability（见 2.6 节）。
 
 1. **结果取决于 prompt。**
    - 纯文本 prompt（`plain`）不校准就已经很好：最优 T = 1.03，干净标签上 ECE 1.9%，温度缩放没有带来收益。
@@ -15,6 +16,11 @@
    - 在 MMLU test 上它显著优于全局 TS，但到了经人工复核的 MMLU-Redux 和 MMLU-Pro 上，这个优势基本消失。
    - 典型例子是 virology：原版 MMLU 上看起来过度自信 +29 个百分点，在复核过的干净题目上实际只有 +1.8 个百分点。
 3. **建议：** 默认用全局 TS。评估校准时以 MMLU-Redux 为准，而不是原版 MMLU test。
+4. **OpenDecisions Capability（quyet-v1）：**
+   - T=1 时为 61.1，复现了参考值 60.6。
+   - 直接用 MMLU 拟合的 T=1.54、不碰任何 OpenDecisions 数据，提升到 65.8（+4.7，95% CI [+3.4, +5.6]）。
+   - 每题型 T 按 group 交叉拟合，提升到 66.9（+5.8，CI [+3.7, +6.5]）。
+   - 提升全部来自 Calibration（73.7 → 86.3），Intelligence 反而略降 1 分。
 
 ---
 
@@ -28,6 +34,10 @@
 2. 每题做一次前向（不生成），读取 K 个选项字母的 logits（`ts/logits.py`）。结果按集合缓存为 `logits_*.npz`，重复运行时不再前向。
 3. 只用校准集拟合温度（`ts/calibration.py`）。
 4. 在各测试集上计算指标，画 reliability diagram，并输出 `report.md` / `metrics.json`（`ts/run.py`、`ts/plots.py`）。
+
+OpenDecisions 用单独的入口 `uv run python -m ts.opendecisions --model <HF 模型>`（`ts/opendecisions.py`），流程是：
+用 quyet-v1 渲染每道题 → 一次前向读取字母 logits → 按几种温度设置（T=1、按 group 交叉拟合、`--fixed-T` 指定）生成预测 →
+用原样复制进 `ts/vendor/` 的官方 `score.py` 打分，详见 2.6 节。
 
 `scripts/run_all.sh` 可以批量跑多个模型和 benchmark，`ts.summarize` 生成汇总表 `results/summary.md`。代码中不依赖具体模型的
 类名或结构（模型通过 `get_decoder()` / `get_output_embeddings()` 通用访问），换模型只需要改 `--model`。
@@ -93,7 +103,7 @@
 
 ### 1.7 测试
 
-`uv run pytest -q tests`，共 10 个测试，全部通过：
+`uv run pytest -q tests`，共 15 个测试，全部通过：
 
 - 能从合成数据中恢复已知的温度（T = 0.5 / 1 / 2.5，误差在 5% 以内）。
 - 温度缩放不改变准确率。
@@ -101,6 +111,11 @@
 - 按学科拟合与收缩的行为符合预期：λ=0 恢复各组真实的 T，λ=∞ 等于全局 T。
 - 没有对应学科的题回退到全局 T。
 - quyet-v1 与附录示例逐字、逐 token 一致。
+- OpenDecisions：
+  - 三种题型的字母与标签映射正确。
+  - 完美预测经官方评分器得 100 分。
+  - 交叉拟合时同一 group 的题落在同一折，所有温度都 ≥ 1。
+  - `--fixed-T` 的参数解析正确。
 
 ---
 
@@ -204,6 +219,51 @@ MCE 不放进主表。它只看最差的那个区间，不考虑样本量。例�
 
 ---
 
+### 2.6 OpenDecisions Capability（quyet-v1）
+
+**数据：** [OpenDecisions](https://huggingface.co/datasets/jgeuter/OpenDecisions)，固定为 revision `ff0b640b`。
+- 共 2,352 题：choice 1,178、yes/no 586、score 588，分为 easy / standard / judge / hard 四个难度层级。
+- 其中 129 题带有真实概率分布（`target_probs`），用来计算 TVD。
+
+**实现（`ts/opendecisions.py`）：**
+- 每题用 quyet-v1 渲染：choice 选项保持 criteria 顺序；yes/no 题 A = true、B = false；score 题按等级从低到高排列。
+- 一次前向，在该题的 K 个字母上做 softmax。
+- 打分用原样复制进 `ts/vendor/` 的官方 `score.py`，没有自己重写。
+- 用数据集自带的 `score.py` 对输出的 `predictions_*.jsonl` 重新打分，结果逐位一致。
+
+**温度：** 每种题型一个 T，按论文的做法强制 T ≥ 1。论文的温度是在另外 3,884 道题上拟合的，这批题没有公开。所以比较以下几种来源：
+
+| 温度 | Capability | Intelligence | Calibration | TVD（129 题） | 相对 T=1（95% CI） |
+|---|---:|---:|---:|---:|---|
+| T = 1（零样本） | 61.1 | 48.5 | 73.7 | 0.262 | – |
+| MMLU 拟合的全局 T = 1.54（不用 OpenDecisions 数据） | 65.8 | 47.8 | 83.9 | 0.236 | +4.7 [+3.4, +5.6] |
+| 每题型 T，按 group 5 折交叉拟合 | **66.9** | 47.5 | 86.3 | 0.234 | +5.8 [+3.7, +6.5] |
+| 每题型 T，在全部题上拟合（偏乐观，仅作参考） | 67.0 | 47.5 | 86.4 | 0.234 | +5.8 [+3.8, +6.5] |
+
+- **交叉拟合的折：** 由整个 `group` 组成，同一题的改写或扰动版本（每组最多 4 题）不会分到不同的折。没有 group 的 1,726 题各自单独成组。
+- **置信区间：** 按 group 做配对 bootstrap（1,000 次），与论文的做法一致。
+- **各折拟合出的 T：** choice 1.65–1.69，yes/no 1.64–1.95，score 1.67–1.77。
+
+**分题型结果（T=1 → 交叉拟合）：**
+
+| 题型 | 准确率 | 能力分 | Calibration |
+|---|---:|---:|---:|
+| choice | 71.5% | 62.3 → 62.3 | 59.0 → 83.1 |
+| yes/no | 76.1% | 47.7 → 47.7 | 78.7 → 85.7 |
+| score | 60.4% | 35.5 → 32.7 | 83.5 → 90.2 |
+
+**和文档参考值的对照：** `doc/prompt-format.md` 里 quyet-v1 零样本的参考值是 Capability 60.6、I 48.3、C 72.9、TVD 0.262，字母概率占比均值 0.96、最小 0.03。
+- 本仓库的结果是 61.1 / 48.5 / 73.7 / 0.262，字母概率占比 0.997 / 0.028。TVD 完全一致，其余相差不到 1 分。
+- 剩余的差异可能来自三方面：硬件和数值精度不同（p5en 对 A10G）、我们用 fp32 计算字母 logits、我们合并了带空格和不带空格的字母。
+- 最后一点也能解释为什么字母概率占比的均值更高。
+
+**观察：**
+- Qwen3.5-9B 在 quyet-v1 下对三种题型都过度自信，最优 T 都在 1.6–2.0 之间，和 MMLU 上的 1.54 接近。
+- 所以一个在 MMLU 上拟合的温度，迁移过来就能拿到交叉拟合约 80% 的提升（+4.7 对 +5.8）。
+- 温度缩放会让 score 题的能力分下降约 3 分（Intelligence 整体降 1 分）。原因是 score 题的能力分用的是期望等级的误差（nMAE）：温度升高后分布变平，期望等级会被拉向中间。
+  这是 Capability 定义本身带来的权衡：
+  提高 T 换来 Calibration +12.6，代价是 Intelligence −1.0。
+
 ## 3. 结论
 
 1. **letter readout 的校准好坏主要取决于 prompt，而不是模型本身。**
@@ -222,6 +282,11 @@ MCE 不放进主表。它只看最差的那个区间，不考虑样本量。例�
 4. **评估方法本身的教训：** 用原版 MMLU test 评估校准，会把标注错误误判为模型过度自信。校准结论应该在 MMLU-Redux 这类人工复核过的数据上确认。
 5. **准确率代价：** quyet-v1 比 plain 低 1.6–2.1 个百分点（MMLU 0.768 vs 0.784，MMLU-Redux 0.802 vs 0.823），在 MMLU-Pro 上两者相当（0.509 vs 0.510）。
    如果实际部署必须用 quyet-v1，在它后面接一个全局 T 就能得到校准良好的置信度。
+6. **OpenDecisions 上的结论与 MCQ 一致。**
+   - quyet-v1 零样本的 Capability 为 61.1，复现了参考值 60.6。
+   - 每题型温度（交叉拟合）把它提升到 66.9，全部来自 Calibration。
+   - 只用 MMLU 拟合的单一 T 也能达到 65.8。
+   - 也就是说，即使没有 OpenDecisions 风格的校准数据，用公开的 MCQ 数据拟合温度也能拿到大部分收益。
 
 ## 4. 局限与后续工作
 
@@ -231,7 +296,8 @@ MCE 不放进主表。它只看最差的那个区间，不考虑样本量。例�
 - **分学科指标的噪声。** 每科约 100 题时，分学科 ECE 本身噪声较大，而且样本少时 ECE 会系统性偏高；本报告的学科层面结论以 gap 和配对 bootstrap 为主。
 - **校准集也有标注噪声。** MMLU 的 validation / dev 同样含有错误标签。如果用 MMLU-Redux 中干净的部分来拟合 T，可能得到更干净的估计；
   但 Redux 是 test 的子集，这样做需要重新划分测试集。
-- **可选扩展：** 按 prompt 类型或题型分别设 T（附录中的 `T_type`），或者用依赖输入的自适应 TS（ATS）。按目前的结果，预期收益有限。
+- **OpenDecisions 的温度：** 论文用来拟合温度的 3,884 道题没有公开，所以交叉拟合的数字和论文的设置并不完全相同。交叉拟合使用了 OpenDecisions 本身的数据；只有"MMLU 拟合的 T"那一行完全没用到它。
+- **可选扩展：** 用依赖输入的自适应 TS（ATS）。按目前的结果，预期收益有限：交叉拟合和在全集上拟合的结果几乎一样（66.9 对 67.0），说明每题型一个 T 已经接近这种方法的上限。
 
 ## 5. 复现
 
@@ -239,6 +305,7 @@ MCE 不放进主表。它只看最差的那个区间，不考虑样本量。例�
 uv sync
 uv run python -m ts.run --model Qwen/Qwen3.5-9B --benchmark mmlu --prompt-format plain     # 约 30 分钟（A10G，含 MMLU-Pro / MMLU-Redux）
 uv run python -m ts.run --model Qwen/Qwen3.5-9B --benchmark mmlu --prompt-format quyet-v1  # 约 30 分钟
+uv run python -m ts.opendecisions --model Qwen/Qwen3.5-9B --fixed-T 1.5404 --fixed-T-note "MMLU-fitted T"  # 约 7 分钟
 uv run python -m ts.summarize        # → results/summary.md
 uv run pytest -q tests
 ```

@@ -1,11 +1,12 @@
 # temperature-scaling
 
-Temperature-scaling calibration for LLMs on multiple-choice benchmarks, using **one-letter readout**: one forward pass per question, then a softmax over the option-letter logits (A/B/C/D…) at the answer position. A single temperature T (or one T per subject) is fitted on a calibration split and evaluated on held-out test sets.
+Temperature-scaling calibration for LLMs on multiple-choice benchmarks, using **one-letter readout**: one forward pass per question, then a softmax over the option-letter logits (A/B/C/D…) at the answer position. A single temperature T (or one T per subject) is fitted on a calibration split and evaluated on held-out test sets. The repo also computes [OpenDecisions](https://huggingface.co/datasets/jgeuter/OpenDecisions) Capability with per-question-type temperatures and the official scorer.
 
 One command fits and evaluates any Hugging Face causal LM. The default is `Qwen/Qwen3.5-9B`.
 
 ```bash
-uv run python -m ts.run --model Qwen/Qwen3.5-9B --benchmark mmlu
+uv run python -m ts.run --model Qwen/Qwen3.5-9B --benchmark mmlu     # MCQ benchmarks
+uv run python -m ts.opendecisions --model Qwen/Qwen3.5-9B            # OpenDecisions Capability
 ```
 
 ## Results (Qwen3.5-9B, zero-shot)
@@ -24,6 +25,20 @@ ECE uses 15 equal-width bins. MMLU-Redux keeps only the items annotated `error_t
 - **`plain` doesn't need calibration.** The plain-text prompt is already well calibrated, and on clean labels (MMLU-Redux) temperature scaling doesn't help.
 - **`quyet-v1` does, and one global T is enough.** The chat prompt is over-confident, and a single global T fixes it. That T transfers from 4-option MMLU to ~10-option MMLU-Pro.
 - **Per-subject TS mostly fits label noise.** It beats global TS on the original MMLU test set. The advantage largely disappears on human-verified MMLU-Redux and on MMLU-Pro.
+
+### OpenDecisions Capability (quyet-v1)
+
+[OpenDecisions](https://huggingface.co/datasets/jgeuter/OpenDecisions) has 2,352 decisions (choice / yes-no / score). It is scored with its official `score.py`: Capability = (Intelligence + Calibration) / 2. Temperatures are one per question type, constrained to T ≥ 1 as in the paper.
+
+| Temperatures | Capability | Intelligence | Calibration | TVD | Δ Capability vs T = 1 (95% CI) |
+|---|---:|---:|---:|---:|---|
+| T = 1 (zero-shot) | 61.1 | 48.5 | 73.7 | 0.262 | – |
+| MMLU-fitted global T = 1.54, no OpenDecisions data | 65.8 | 47.8 | 83.9 | 0.236 | +4.7 [+3.4, +5.6] |
+| Per-type T, cross-fitted by group (T ≈ 1.64–1.95) | **66.9** | 47.5 | 86.3 | 0.234 | +5.8 [+3.7, +6.5] |
+
+- The zero-shot row reproduces the reference numbers in [doc/prompt-format.md](doc/prompt-format.md): 60.6 / 48.3 / 72.9, TVD 0.262.
+- Temperature scaling raises Calibration by 10–13 points. It costs about 1 point of Intelligence, because the score-type metric uses the expected level, which a flatter distribution pulls toward mid-scale.
+- The CIs come from a paired bootstrap over question groups.
 
 The full write-up, in Chinese, is in **[doc/report.md](doc/report.md)**. It covers the implementation, all metrics (ECE-10, Brier, high-confidence region, bootstrap CIs, per-subject analysis) and the conclusions.
 
@@ -45,6 +60,22 @@ The full write-up, in Chinese, is in **[doc/report.md](doc/report.md)**. It cove
    - ECE and MCE (15 and 10 bins), NLL, Brier, mean confidence.
    - A high-confidence-region check and per-subject tables.
    - Reliability diagrams.
+
+## OpenDecisions
+
+```bash
+uv run python -m ts.opendecisions --model Qwen/Qwen3.5-9B
+uv run python -m ts.opendecisions --model Qwen/Qwen3.5-9B --fixed-T 1.5404 --fixed-T-note "MMLU-fitted T"
+```
+
+Each item is rendered with the quyet-v1 prompt, and the letter logits are read with one forward pass. The run reports four temperature settings:
+
+- `t1`: T = 1.
+- `crossfit`: per-type T fitted on the other folds; folds are whole `group`s, and an ungrouped item is its own group.
+- `insample`: fitted on all items. This is optimistic, for reference only.
+- `fixed`: values given with `--fixed-T`. Pass `T` or `choice,yesno,score`.
+
+Scoring uses the vendored official scorer ([ts/vendor/](ts/vendor/README.md), pinned to a dataset revision). Each setting's `predictions_<setting>.jsonl` can be re-scored with the dataset's own `score.py`. A run takes about 7 minutes on an A10G: about 5 minutes of forward passes and 1.5 minutes of bootstrap. Use `--bootstrap 0` to skip the confidence intervals.
 
 ## Installation
 
@@ -130,10 +161,12 @@ ts/
   logits.py       model loading and batched letter-logit extraction (fp32 head)
   calibration.py  temperature fitting, per-subject shrinkage + CV, ECE / NLL / Brier / MCE
   plots.py        reliability diagrams, NLL-vs-T curve
-  run.py          end-to-end CLI
+  run.py          end-to-end CLI (MCQ benchmarks)
+  opendecisions.py  OpenDecisions Capability: quyet-v1 readout, per-type T (cross-fit / fixed), official scorer
+  vendor/         official OpenDecisions score.py, verbatim (MIT)
   summarize.py    aggregate results/*/*/metrics.json into results/summary.md
 scripts/run_all.sh  run every (model, benchmark) pair
-tests/              unit tests (fitting, metrics, shrinkage, quyet-v1 prompt parity)
+tests/              unit tests (fitting, metrics, shrinkage, quyet-v1 prompt parity, OpenDecisions glue)
 doc/                report and prompt-format spec
 results/            run outputs (metrics, reports, figures)
 ```
@@ -158,3 +191,4 @@ The quyet-v1 prompt tests download the Qwen3.5-9B tokenizer and check the render
 - Tian et al., 2023. *Just Ask for Calibration*. arXiv:2305.14975
 - Wang et al., 2024. *MMLU-Pro*. arXiv:2406.01574
 - Gema et al., 2024. *Are We Done with MMLU?* (MMLU-Redux). arXiv:2406.04127
+- *Releasing the Inner Jev: A Simple Recipe for Open Decision Models*, 2026 (OpenDecisions). arXiv:2610.17205

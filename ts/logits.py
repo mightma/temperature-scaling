@@ -49,7 +49,6 @@ def letter_token_ids(tokenizer, k: int, variants: str) -> list[list[int]]:
     return ids
 
 
-@torch.no_grad()
 def extract_logits(
     model,
     tokenizer,
@@ -60,17 +59,40 @@ def extract_logits(
     max_batch_size: int = 32,
     desc: str = "forward",
 ) -> np.ndarray:
-    """Returns float32 array [N, K_max] of option logits; missing options are -inf."""
-    k_max = max(len(it["choices"]) for it in items)
+    """MCQ items -> float32 array [N, K_max] of option logits; missing options are -inf."""
+    prompts = [build_prompt(it, tokenizer, prompt_format) for it in items]
+    ks = [len(it["choices"]) for it in items]
+    # chat-templated prompts already contain the model's special tokens (e.g. Gemma's <bos>)
+    z, _ = extract_prompt_logits(
+        model, tokenizer, prompts, ks, variants, max_batch_tokens, max_batch_size, desc, add_special_tokens=prompt_format == "plain"
+    )
+    return z
+
+
+@torch.no_grad()
+def extract_prompt_logits(
+    model,
+    tokenizer,
+    prompts: list[str],
+    ks: list[int],
+    variants: str = "both",
+    max_batch_tokens: int = 16384,
+    max_batch_size: int = 32,
+    desc: str = "forward",
+    add_special_tokens: bool = False,
+    letter_mass: bool = False,
+) -> tuple[np.ndarray, np.ndarray | None]:
+    """Rendered prompts + option counts -> (float32 [N, K_max] option logits with -inf for missing
+    options, and optionally the share of full-vocabulary next-token probability on the letters)."""
+    k_max = max(ks)
     groups = letter_token_ids(tokenizer, k_max, variants)
     width = max(len(g) for g in groups)
     # [K_max, width] gather index, padded by repeating the group's first id (masked out below)
     gather = torch.tensor([g + [g[0]] * (width - len(g)) for g in groups])
     valid = torch.tensor([[True] * len(g) + [False] * (width - len(g)) for g in groups])
 
-    prompts = [build_prompt(it, tokenizer, prompt_format) for it in items]
-    encoded = [tokenizer.encode(p, add_special_tokens=True) for p in prompts]
-    order = sorted(range(len(items)), key=lambda i: -len(encoded[i]))
+    encoded = [tokenizer.encode(p, add_special_tokens=add_special_tokens) for p in prompts]
+    order = sorted(range(len(prompts)), key=lambda i: -len(encoded[i]))
 
     # bf16 logits of magnitude ~16-32 are quantised to steps of 0.125, which is coarse for
     # calibration. Instead take the final hidden state and apply only the letter rows of the
@@ -84,9 +106,19 @@ def extract_logits(
     softcap = getattr(cfg, "final_logit_softcapping", None)
     scale = getattr(cfg, "logit_scale", None)  # e.g. Cohere
 
-    out = np.full((len(items), k_max), -np.inf, dtype=np.float32)
+    def finish(logits):
+        if b is not None:
+            logits = logits + b
+        if scale is not None:
+            logits = logits * scale
+        if softcap is not None:
+            logits = torch.tanh(logits / softcap) * softcap
+        return logits
+
+    out = np.full((len(prompts), k_max), -np.inf, dtype=np.float32)
+    mass = np.full(len(prompts), np.nan, dtype=np.float32) if letter_mass else None
     device = model.get_input_embeddings().weight.device
-    pbar = tqdm(total=len(items), desc=desc)
+    pbar = tqdm(total=len(prompts), desc=desc)
     pos = 0
     while pos < len(order):
         longest = len(encoded[order[pos]])
@@ -97,21 +129,24 @@ def extract_logits(
             input_ids=batch["input_ids"].to(device),
             attention_mask=batch["attention_mask"].to(device),
             use_cache=False,
-        ).last_hidden_state[:, -1, :].to(w.device, torch.float32)
-        logits = h @ w.T
-        if b is not None:
-            logits = logits + b
-        if scale is not None:
-            logits = logits * scale
-        if softcap is not None:
-            logits = torch.tanh(logits / softcap) * softcap
+        ).last_hidden_state[:, -1, :]
+        logits = finish(h.to(w.device, torch.float32) @ w.T)
         sel = logits.view(len(idx), k_max, width)
         sel = sel.masked_fill(~valid.to(logits.device), -math.inf)
-        z = torch.logsumexp(sel, dim=-1).cpu().numpy()
+        z = torch.logsumexp(sel, dim=-1)
+        if letter_mass:
+            # full-vocabulary normaliser from the regular (bf16) head, only for this diagnostic
+            full = finish(head(h.to(head.weight.dtype)).float())
+            lse = torch.logsumexp(full, dim=-1)
+            full_sel = full[:, gather.to(full.device)].masked_fill(~valid.to(full.device), -math.inf)
+            z_full = torch.logsumexp(full_sel, dim=-1)
+        z = z.cpu().numpy()
         for row, i in enumerate(idx):
-            k = len(items[i]["choices"])
+            k = ks[i]
             out[i, :k] = z[row, :k]
+            if letter_mass:
+                mass[i] = float(torch.exp(torch.logsumexp(z_full[row, :k], 0) - lse[row]))
         pos += bs
         pbar.update(len(idx))
     pbar.close()
-    return out
+    return out, mass

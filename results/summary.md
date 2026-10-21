@@ -1,3 +1,5 @@
+## MCQ benchmarks
+
 | Model | Setting | Eval set | Method | T | n | Acc | ECE-15 | ECE-10 | NLL | Brier |
 |---|---|---|---|---|---:|---:|---:|---:|---:|---:|
 | Qwen/Qwen3.5-9B | mmlu_plain_both | mmlu test | none | 1 | 14042 | 0.7841 | 0.0179 | 0.0172 | 0.5711 | 0.2962 |
@@ -24,3 +26,12 @@
 | Qwen/Qwen3.5-9B | mmlu_quyet-v1_both | mmlu_redux (test-only) | global | 1.540 | 5330 | 0.8015 | 0.0306 | 0.0323 | 0.5108 | 0.2640 |
 | Qwen/Qwen3.5-9B | mmlu_quyet-v1_both | mmlu_redux (test-only) | subject_indep | per-subject (λ=0) | 5330 | 0.8015 | 0.0246 | 0.0257 | 0.7634 | 0.2712 |
 | Qwen/Qwen3.5-9B | mmlu_quyet-v1_both | mmlu_redux (test-only) | subject_shrunk | per-subject (λ=10) | 5330 | 0.8015 | 0.0273 | 0.0272 | 0.5084 | 0.2633 |
+
+## OpenDecisions
+
+| Model | Setting | Temperatures | Capability | Intelligence | Calibration | TVD | Δ vs T=1 (95% CI) |
+|---|---|---|---:|---:|---:|---:|---|
+| Qwen/Qwen3.5-9B | opendecisions_quyet-v1_both | T = 1 (zero-shot) | 61.1 | 48.5 | 73.7 | 0.262 | – |
+| Qwen/Qwen3.5-9B | opendecisions_quyet-v1_both | Per-type T, cross-fitted by group | 66.9 | 47.5 | 86.3 | 0.234 | [+3.7, +6.5] |
+| Qwen/Qwen3.5-9B | opendecisions_quyet-v1_both | Per-type T, fitted on all items (optimistic) | 67.0 | 47.5 | 86.4 | 0.234 | [+3.8, +6.5] |
+| Qwen/Qwen3.5-9B | opendecisions_quyet-v1_both | Fixed T (--fixed-T) | 65.8 | 47.8 | 83.9 | 0.236 | [+3.4, +5.6] |
